@@ -103,7 +103,9 @@ def train(rank, a, h):
                 start_b = time.time()
             x, y, _ = batch
             y = torch.autograd.Variable(y.to(device, non_blocking=False))
+            # y = torch.autograd.Variable(y.to(device, non_blocking=True))
             x = {k: torch.autograd.Variable(v.to(device, non_blocking=False)) for k, v in x.items()}
+            # x = {k: torch.autograd.Variable(v.to(device, non_blocking=True)) for k, v in x.items()}
 
             y_g_hat, commit_loss, metrics = generator(**x)
             f0_commit_loss = commit_loss[0]
@@ -181,12 +183,12 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--checkpoint_path', default='cp_hifigan')
-    parser.add_argument('--config', default='')
+    parser.add_argument('--checkpoint_path', default='checkpoints/VCTK_f0_vq')
+    parser.add_argument('--config', default='configs/VCTK/f0_vqvae.json')
     parser.add_argument('--training_epochs', default=10000, type=int)
     parser.add_argument('--training_steps', default=400000, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
-    parser.add_argument('--checkpoint_interval', default=10000, type=int)
+    parser.add_argument('--checkpoint_interval', default=5000, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
     parser.add_argument('--validation_interval', default=1000, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)

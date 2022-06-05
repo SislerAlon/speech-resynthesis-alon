@@ -237,9 +237,9 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--code_file', default=None)
-    parser.add_argument('--input_code_file', default='./datasets/LJSpeech/cpc100/test.txt')
+    parser.add_argument('--input_code_file', default='./datasets/VCTK/hubert100/test.txt')
     parser.add_argument('--output_dir', default='generated_files')
-    parser.add_argument('--checkpoint_file', required=True)
+    parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae', required=True)
     parser.add_argument('--f0-stats', type=Path)
     parser.add_argument('--vc', action='store_true')
     parser.add_argument('--random-speakers', action='store_true')
@@ -314,8 +314,10 @@ def main():
     else:
         idx = list(range(len(dataset)))
         random.shuffle(idx)
-        with Pool(8, init_worker, (idQueue, a)) as pool:
-            for i, _ in enumerate(pool.imap(inference, idx), 1):
+        # with Pool(8, init_worker, (idQueue, a)) as pool:
+        #     for i, _ in enumerate(pool.imap(inference, idx), 1):
+        with Pool(1, init_worker, (idQueue, a)) as pool:
+            for i, _ in enumerate(pool.imap(inference, idx), 0):
                 bar = progbar(i, len(idx))
                 message = f'{bar} {i}/{len(idx)} '
                 stream(message)
