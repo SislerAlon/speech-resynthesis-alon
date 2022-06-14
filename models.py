@@ -10,6 +10,10 @@ from modules.jukebox import Encoder, Decoder
 from utils import init_weights, get_padding, AttrDict
 from modules.vq import Bottleneck
 
+
+import pandas as pd
+import numpy as np
+
 LRELU_SLOPE = 0.1
 
 
@@ -130,7 +134,33 @@ class CodeGenerator(Generator):
         self.multispkr = h.get('multispkr', None)
 
         if self.multispkr:
-            self.spkr = nn.Embedding(200, h.embedding_dim)
+            # self.spkr = nn.Embedding(200, h.embedding_dim)
+            with open(r"src/x_vectors_embedding/represenation_x_vectors.npy", 'rb') as f:
+                speaker_weight_matrix = np.load(f)
+
+            num_embeddings_speaker, embedding_dim_speaker = speaker_weight_matrix.shape
+            self.spkr = nn.Embedding(num_embeddings_speaker, embedding_dim_speaker)
+            self.spkr.weight = torch.nn.Parameter(torch.from_numpy(speaker_weight_matrix).float(), requires_grad=False)
+            self.spkr.weight.requires_grad = False
+
+            # without pre train
+            # self.spkr = nn.Embedding(200, h.embedding_dim // 2)
+
+            # with open(r"C:\git\AccentTransfer\experiments\represenation.npy", 'rb') as f:
+            with open(r"src/represenation_mfcc/represenation_mfcc.npy", 'rb') as f:
+                weight_matrix = np.load(f)
+
+            speakers_data_path = r"src/speakers_data.csv"
+            speakers_data = pd.read_csv(speakers_data_path).set_index('Id')
+            self.speakers_data_dict = speakers_data.to_dict('index')
+
+            num_embeddings, embedding_dim = weight_matrix.shape
+            self.accent_lt = nn.Embedding(num_embeddings, embedding_dim)
+            self.accent_lt.weight = torch.nn.Parameter(torch.from_numpy(weight_matrix).float(), requires_grad=False)
+            self.accent_lt.weight.requires_grad = False
+            self.accent = True
+
+            assert embedding_dim+embedding_dim_speaker == 128
 
         self.encoder = None
         self.vq = None
@@ -213,11 +243,25 @@ class CodeGenerator(Generator):
 
         if self.multispkr:
             spkr = self.spkr(kwargs['spkr']).transpose(1, 2)
+            # spkr = self.spkr(torch.tensor([[30]],dtype=torch.int32).cuda()).transpose(1, 2)
             spkr = self._upsample(spkr, x.shape[-1])
             x = torch.cat([x, spkr], dim=1)
 
+        ####### Accent code ########
+        if self.accent:
+            if 'accent' in kwargs:
+                id_to_take = kwargs['accent']
+            else:
+                id_to_take = kwargs['spkr']
+            accent = self.accent_lt(id_to_take).transpose(1, 2)
+            # accent = self.accent_lt(torch.tensor([[107]],dtype=torch.int32).cuda()).transpose(1, 2)
+            accent = self._upsample(accent, x.shape[-1])
+            x = torch.cat([x, accent], dim=1)
+        ############################
+
         for k, feat in kwargs.items():
-            if k in ['spkr', 'code', 'f0']:
+            # if k in ['spkr', 'code', 'f0']:
+            if k in ['spkr', 'code', 'f0', 'accent']:
                 continue
 
             feat = self._upsample(feat, x.shape[-1])
