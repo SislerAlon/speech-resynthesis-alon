@@ -19,6 +19,8 @@ import torch.utils.data
 from librosa.filters import mel as librosa_mel_fn
 from librosa.util import normalize
 
+import torchaudio
+
 MAX_WAV_VALUE = 32768.0
 
 
@@ -69,6 +71,7 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
 
 def load_audio(full_path):
     data, sampling_rate = sf.read(full_path, dtype='int16')
+
     return data, sampling_rate
 
 
@@ -193,6 +196,15 @@ class CodeDataset(torch.utils.data.Dataset):
 
             self.id_to_spkr = spkrs
             self.spkr_to_id = {k: v for v, k in enumerate(self.id_to_spkr)}
+
+            save_spkr_to_id = False
+            if save_spkr_to_id:
+                with open('spkr_to_id.json', 'w') as outfile:
+                    # outfile.write(str(self.spkr_to_id))
+                    import json
+                    json.dump(self.spkr_to_id, outfile)
+                print("Generate new mapping of speaker to id")
+
 
     def _sample_interval(self, seqs, seq_len=None):
         N = max([v.shape[-1] for v in seqs])
