@@ -273,7 +273,7 @@ def generate_from_speakers(generator, base_speaker,target_speaker,target_accent,
 
 
 
-    item_index = speaker_to_dataset_index[base_speaker][5]
+    item_index = speaker_to_dataset_index[base_speaker][base_speaker_index]
 
     sound_file_output_path = generator(item_index=item_index,
                                       target_speaker=target_speaker,

@@ -28,10 +28,7 @@ data_sound = base64.b64encode(open(data_sound_file, 'rb').read())
 
 
 GENERATOR = inference_alon.init_generator('C:/git/speech-resynthesis-alon/tmp')
-
-
-
-
+speaker_to_dataset_index = GENERATOR.get_index_by_speaker()
 
 # Lista con los títulos y los filtros de la barra de la izquierda.
 MENU = [
@@ -40,6 +37,15 @@ MENU = [
         id="base_speaker_selector",
         options=[{"label": r, "value": r} for r in speakers_list],
         value=speakers_list[0],
+        multi=False,
+        clearable=False,
+        style={"width": "100%"}
+    ),
+    html.P("Base Speaker Utterance index", className="title-filter"),
+    dcc.Dropdown(
+        id="base_speaker_index_selector",
+        options=[{"label": str(r), "value": r} for r in range(5)],
+        value=0,
         multi=False,
         clearable=False,
         style={"width": "100%"}
@@ -65,7 +71,7 @@ MENU = [
 
 ]
 
-GRAFICOS = [dcc.Graph(id="line-chart"), dcc.Graph(id="donut-chart")]
+# GRAFICOS = [dcc.Graph(id="line-chart"), dcc.Graph(id="donut-chart")]
 
 app = dash.Dash(__name__)
 app.layout = html.Div(
@@ -119,25 +125,33 @@ def get_src_from_sound_file_path(data_sound_file):
 
 
 @app.callback(
-    [Output("gt_player", "src"), Output("gt_gen_player", "src"), Output("new_player", "src")],
+    [Output("gt_player", "src"), Output("gt_gen_player", "src"), Output("new_player", "src"), Output("base_speaker_index_selector", "options")],
     [
         Input("base_speaker_selector", "value"),
         Input("target_speaker_selector", "value"),
         Input("target_accent_selector", "value"),
+        Input("base_speaker_index_selector", "value"),
     ],
 )
-def update_graphs(base_speaker, target_speaker, target_accent):
-    sound_file_output_path = inference_alon.generate_from_speakers(generator = GENERATOR,
+def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_index):
+    sound_file_output_path = inference_alon.generate_from_speakers(generator=GENERATOR,
                                         base_speaker=base_speaker,
                                         target_speaker=target_speaker,
-                                        target_accent=target_accent)
+                                        target_accent=target_accent,
+                                        base_speaker_index=base_speaker_index)
+
+
+
 
     print(sound_file_output_path)
 
     gt_src = get_src_from_sound_file_path(sound_file_output_path['gt'])
     gt_gen_src = get_src_from_sound_file_path(sound_file_output_path['gt_gen'])
     new_src = get_src_from_sound_file_path(sound_file_output_path['new'])
-    return gt_src, gt_gen_src, new_src
+
+    number_of_utterance = len(speaker_to_dataset_index[base_speaker])
+    utterance_options = [{"label": str(r), "value": r} for r in range(number_of_utterance)]
+    return gt_src, gt_gen_src, new_src, utterance_options
 
 
 if __name__ == "__main__":
