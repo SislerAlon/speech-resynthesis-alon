@@ -128,7 +128,7 @@ def init_worker(queue, arguments):
                               f0_stats=h.get('f0_stats', None), f0_normalize=h.get('f0_normalize', False),
                               f0_feats=h.get('f0_feats', False), f0_median=h.get('f0_median', False),
                               f0_interp=h.get('f0_interp', False), vqvae=h.get('code_vq_params', False),
-                              pad=a.pad)
+                              pad=a.pad, accent_embedding_by_accent=h.get('Accent_embedding_by_accent', None))
 
     if a.unseen_f0:
         dataset.f0_stats = torch.load(a.unseen_f0)
@@ -175,6 +175,11 @@ def inference(item_index):
             code['f0'] = code['f0'][..., :-to_remove_f0]
 
     new_code = dict(code)
+
+    if a.dur_prediction:
+        new_code['code'] = torch.unique_consecutive(new_code['code']).unsqueeze(0)
+        new_code['dur_prediction'] = True
+        #debug this - duration is kept?
     if 'f0' in new_code:
         del new_code['f0']
         new_code['f0'] = code['f0']
@@ -234,12 +239,13 @@ def inference(item_index):
 
 def main():
     print('Initializing Inference Process..')
-
+    main_output_path = 'D:/Thesis/generated_results'
     parser = argparse.ArgumentParser()
     parser.add_argument('--code_file', default=None)
     parser.add_argument('--input_code_file', default='./datasets/VCTK/hubert100/test.txt')
-    parser.add_argument('--output_dir', default='generated_files')
-    parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae', required=True)
+    parser.add_argument('--output_dir', default=f'{main_output_path}/generated_files_accent_change_double_zero_accent')
+    parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae_accent_speaker')#, required=True)
+    # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae', required=True)
     parser.add_argument('--f0-stats', type=Path)
     parser.add_argument('--vc', action='store_true')
     parser.add_argument('--random-speakers', action='store_true')
@@ -247,7 +253,8 @@ def main():
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--parts', action='store_true')
     parser.add_argument('--unseen-f0', type=Path)
-    parser.add_argument('-n', type=int, default=10)
+    parser.add_argument('-n', type=int, default=20)
+    parser.add_argument('--dur-prediction', action='store_true',default=True)
     a = parser.parse_args()
 
     seed = 52
@@ -294,7 +301,7 @@ def main():
                               f0_stats=h.get('f0_stats', None), f0_normalize=h.get('f0_normalize', False),
                               f0_feats=h.get('f0_feats', False), f0_median=h.get('f0_median', False),
                               f0_interp=h.get('f0_interp', False), vqvae=h.get('code_vq_params', False),
-                              pad=a.pad)
+                              pad=a.pad, accent_embedding_by_accent=h.get('Accent_embedding_by_accent', None))
 
     if a.debug:
         ids = list(range(1))

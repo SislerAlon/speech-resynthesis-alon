@@ -5,9 +5,14 @@ import tensorflow as tf
 
 import torch
 
-standard_scaler_dict_path = r"C:/git/x_vectors_embedding/standard_scaler_dict.npy"
-speaker_model_path = r"C:/git/x_vectors_embedding/waveform_to_speaker_emb.h5"
+# standard_scaler_dict_path = r"C:/git/x_vectors_embedding/standard_scaler_dict.npy"
+# speaker_model_path = r"C:/git/x_vectors_embedding/waveform_to_speaker_emb.h5"
 
+# standard_scaler_dict_path = r"C:/git/x_vectors_embedding/standard_scaler_dict_orig.npy"
+# speaker_model_path = r"C:/git/x_vectors_embedding/waveform_to_speaker_emb_mod_small.h5"
+
+standard_scaler_dict_path = r"src/speaker_model/standard_scaler_dict_orig.npy"
+speaker_model_path = r"src/speaker_model/waveform_to_speaker_emb_mod_small.h5"
 
 class SpeakerModel:
     def __init__(self):
@@ -28,12 +33,32 @@ class SpeakerModel:
         # speaker_id = np.argmax(self.speaker_model.predict(norm_features.numpy()),axis=0)
         with tf.device('/cpu:0'):
             # speaker_id = self.speaker_model.predict(norm_features.numpy())
-            speaker_id = self.speaker_model.predict(norm_features.unsqueeze(0).numpy())
+            # speaker_id = self.speaker_model.predict(norm_features.unsqueeze(0).numpy())
+            if norm_features.dim() == 1:
+                speaker_id = self.speaker_model.predict(norm_features.unsqueeze(0).numpy())
+            else:
+                speaker_id = self.speaker_model.predict(norm_features.numpy())
         return speaker_id
 
 
 
 if __name__ == "__main__":
     sm = SpeakerModel()
-    input = torch.rand(16, 8960)
-    print(sm(input))
+    import librosa
+    import pandas as pd
+
+    speakers_data_path = r"src/speakers_data.csv"
+    speakers_data = pd.read_csv(speakers_data_path).set_index('Id')
+    speakers_data_dict = speakers_data.to_dict('index')
+    speakers_list = list(speakers_data_dict.keys())
+
+
+
+    audio_path_p225 = r"src/demo/p225_023_mic2_gt.wav"
+    waveform, Librosa_sample_rate = librosa.load(audio_path_p225)
+    #input = torch.rand(16, 8960)
+    print(sm(waveform))
+    output_speaker = speakers_list[np.argmax(sm(torch.Tensor(waveform).unsqueeze(0)))]
+
+
+    print(output_speaker)

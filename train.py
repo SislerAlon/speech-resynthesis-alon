@@ -27,7 +27,18 @@ from models import CodeGenerator, MultiPeriodDiscriminator, MultiScaleDiscrimina
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, \
     save_checkpoint, build_env, AttrDict
 
+
+import speaker_model
+import numpy as np
+import librosa
+import soundfile as sf
+
+
 torch.backends.cudnn.benchmark = True
+
+
+
+
 
 
 def train(rank, local_rank, a, h):
@@ -96,7 +107,7 @@ def train(rank, local_rank, a, h):
                            f0_stats=h.get('f0_stats', None),
                            f0_normalize=h.get('f0_normalize', False), f0_feats=h.get('f0_feats', False),
                            f0_median=h.get('f0_median', False), f0_interp=h.get('f0_interp', False),
-                           vqvae=h.get('code_vq_params', False))
+                           vqvae=h.get('code_vq_params', False),accent_embedding_by_accent=h.get('Accent_embedding_by_accent', None))
 
     train_sampler = DistributedSampler(trainset) if h.num_gpus > 1 else None
 
@@ -110,11 +121,15 @@ def train(rank, local_rank, a, h):
                                multispkr=h.get('multispkr', None),
                                f0_stats=h.get('f0_stats', None), f0_normalize=h.get('f0_normalize', False),
                                f0_feats=h.get('f0_feats', False), f0_median=h.get('f0_median', False),
-                               f0_interp=h.get('f0_interp', False), vqvae=h.get('code_vq_params', False))
+                               f0_interp=h.get('f0_interp', False), vqvae=h.get('code_vq_params', False),accent_embedding_by_accent=h.get('Accent_embedding_by_accent', None))
         validation_loader = DataLoader(validset, num_workers=0, shuffle=False, sampler=None,
                                        batch_size=h.batch_size, pin_memory=True, drop_last=True)
 
         sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
+
+    # spk_model = speaker_model.SpeakerModel()
+    # speaker_loss = torch.nn.CrossEntropyLoss()
+
 
     generator.train()
     mpd.train()
@@ -130,13 +145,16 @@ def train(rank, local_rank, a, h):
         for i, batch in enumerate(train_loader):
             if rank == 0:
                 start_b = time.time()
-            x, y, _, y_mel = batch
+            # x, y, _, y_mel = batch
+            x, y, file_name_list, y_mel = batch
             y = torch.autograd.Variable(y.to(device, non_blocking=False))
             y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=False))
             y = y.unsqueeze(1)
             x = {k: torch.autograd.Variable(v.to(device, non_blocking=False)) for k, v in x.items()}
 
-            y_g_hat = generator(**x)
+            # y_g_hat = generator(**x)
+            y_g_hat, dur_losses = generator(**x)
+
             if h.get('f0_vq_params', None) or h.get('code_vq_params', None):
                 y_g_hat, commit_losses, metrics = y_g_hat
 
@@ -169,6 +187,15 @@ def train(rank, local_rank, a, h):
             # Generator
             optim_g.zero_grad()
 
+            # # speaker loss
+            # # speaker_hat = spk_model(y_g_hat.cpu().detach().squeeze())
+            # data1, sampling_rate1 = sf.read(file_name_list[1])
+            # speaker_hat = spk_model(data1)
+            # # speaker_hat = spk_model(librosa.util.normalize(y_g_hat.cpu().detach().numpy().squeeze().astype(np.float32)))
+            # # speaker_loss(x['spkr'],speaker_hat)
+            # # accent loss
+
+
             # L1 Mel-Spectrogram Loss
             loss_mel = F.l1_loss(y_mel, y_g_hat_mel) * 45
 
@@ -183,6 +210,8 @@ def train(rank, local_rank, a, h):
                 loss_gen_all += f0_commit_loss * h.get('lambda_commit', None)
             if h.get('code_vq_params', None):
                 loss_gen_all += code_commit_loss * h.get('lambda_commit_code', None)
+            if h.get('dur_prediction_weight', None):
+                loss_gen_all += dur_losses * h.get('dur_prediction_weight', None)
 
             loss_gen_all.backward()
             optim_g.step()
@@ -235,7 +264,9 @@ def train(rank, local_rank, a, h):
                             x, y, _, y_mel = batch
                             x = {k: v.to(device, non_blocking=False) for k, v in x.items()}
 
-                            y_g_hat = generator(**x)
+                            # y_g_hat = generator(**x)
+                            y_g_hat, dur_losses = generator(**x)
+
                             if h.get('f0_vq_params', None) or h.get('code_vq_params', None):
                                 y_g_hat, commit_losses, _ = y_g_hat
 
@@ -290,12 +321,13 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--checkpoint_path', default='checkpoints/VCTK_vqvae')
-    parser.add_argument('--config', default='')
+    parser.add_argument('--checkpoint_path', default='checkpoints/VCTK_vqvae_accent_speaker_duration_by_accent')
+    parser.add_argument('--config', default='configs/VCTK/hubert100_lut.json')
     parser.add_argument('--training_epochs', default=2000, type=int)
     parser.add_argument('--training_steps', default=400000, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
     parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    # parser.add_argument('--checkpoint_interval', default=250, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
     parser.add_argument('--validation_interval', default=1000, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)

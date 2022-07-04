@@ -72,6 +72,43 @@ class ResBlock2(torch.nn.Module):
         for l in self.convs:
             remove_weight_norm(l)
 
+class VariancePredictor(nn.Module):
+    def __init__(
+        self,
+        encoder_embed_dim,
+        var_pred_hidden_dim,
+        var_pred_kernel_size,
+        var_pred_dropout
+    ):
+        super().__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv1d(
+                encoder_embed_dim, var_pred_hidden_dim,
+                kernel_size=var_pred_kernel_size,
+                padding=(var_pred_kernel_size - 1) // 2
+            ),
+            nn.ReLU()
+        )
+        self.ln1 = nn.LayerNorm(var_pred_hidden_dim)
+        self.dropout = var_pred_dropout
+        self.conv2 = nn.Sequential(
+            nn.Conv1d(
+                var_pred_hidden_dim, var_pred_hidden_dim,
+                kernel_size=var_pred_kernel_size, padding=1
+            ),
+            nn.ReLU()
+        )
+        self.ln2 = nn.LayerNorm(var_pred_hidden_dim)
+        self.proj = nn.Linear(var_pred_hidden_dim, 1)
+
+    def forward(self, x):
+        # Input: B x T x C; Output: B x T
+        x = self.conv1(x.transpose(1, 2)).transpose(1, 2)
+        x = F.dropout(self.ln1(x), p=self.dropout, training=self.training)
+        x = self.conv2(x.transpose(1, 2)).transpose(1, 2)
+        x = F.dropout(self.ln2(x), p=self.dropout, training=self.training)
+        return self.proj(x).squeeze(dim=2)
+
 
 class Generator(torch.nn.Module):
     def __init__(self, h):
@@ -125,6 +162,32 @@ class Generator(torch.nn.Module):
         remove_weight_norm(self.conv_pre)
         remove_weight_norm(self.conv_post)
 
+def process_duration(code, code_feat):
+    uniq_code_count = []
+    uniq_code_feat = []
+    for i in range(code.size(0)):
+        _, count = torch.unique_consecutive(code[i, :], return_counts=True)
+        if len(count) > 2:
+            # remove first and last code as segment sampling may cause incomplete segment length
+            uniq_code_count.append(count[1:-1])
+            uniq_code_idx = count.cumsum(dim=0)[:-2]
+        else:
+            uniq_code_count.append(count)
+            uniq_code_idx = count.cumsum(dim=0) - 1
+        uniq_code_feat.append(code_feat[i, uniq_code_idx, :].view(-1, code_feat.size(2)))
+    uniq_code_count = torch.cat(uniq_code_count)
+
+    # collate feat
+    max_len = max(feat.size(0) for feat in uniq_code_feat)
+    out = uniq_code_feat[0].new_zeros((len(uniq_code_feat), max_len, uniq_code_feat[0].size(1)))
+    mask = torch.arange(max_len).repeat(len(uniq_code_feat), 1)
+    for i, v in enumerate(uniq_code_feat):
+        out[i, : v.size(0)] = v
+        mask[i, :] = mask[i, :] < v.size(0)
+
+    return out, mask.bool(), uniq_code_count.float()
+
+
 
 class CodeGenerator(Generator):
     def __init__(self, h):
@@ -134,6 +197,7 @@ class CodeGenerator(Generator):
         self.multispkr = h.get('multispkr', None)
 
         if self.multispkr:
+            # without pre-train
             # self.spkr = nn.Embedding(200, h.embedding_dim)
             with open(r"src/x_vectors_embedding/represenation_x_vectors.npy", 'rb') as f:
                 speaker_weight_matrix = np.load(f)
@@ -143,12 +207,17 @@ class CodeGenerator(Generator):
             self.spkr.weight = torch.nn.Parameter(torch.from_numpy(speaker_weight_matrix).float(), requires_grad=False)
             self.spkr.weight.requires_grad = False
 
-            # without pre train
             # self.spkr = nn.Embedding(200, h.embedding_dim // 2)
 
-            # with open(r"C:\git\AccentTransfer\experiments\represenation.npy", 'rb') as f:
-            with open(r"src/represenation_mfcc/represenation_mfcc.npy", 'rb') as f:
-                weight_matrix = np.load(f)
+            self.Accent_embedding_by_accent = h.get('Accent_embedding_by_accent', None)
+
+            if self.Accent_embedding_by_accent:
+                # with open(r"C:\git\Paccent_classifier\accent_represenation_x_vectors.npy", 'rb') as f:
+                with open(r"src/accent_model/accent_represenation_x_vectors.npy", 'rb') as f:
+                    weight_matrix = np.load(f)
+            else: # by speaker - diff aceent emdedding per speaker
+                with open(r"src/represenation_mfcc/represenation_mfcc.npy", 'rb') as f:
+                    weight_matrix = np.load(f)
 
             speakers_data_path = r"src/speakers_data.csv"
             speakers_data = pd.read_csv(speakers_data_path).set_index('Id')
@@ -185,6 +254,10 @@ class CodeGenerator(Generator):
             self.quantizer.eval()
             self.f0_dict = nn.Embedding(h.f0_quantizer['f0_vq_params']['l_bins'], h.embedding_dim)
 
+        self.dur_predictor = None
+        if h.get('dur_prediction_weight', None):
+            self.dur_predictor = VariancePredictor(**h.dur_predictor_params)
+
     @staticmethod
     def _upsample(signal, max_frames):
         if signal.dim() == 3:
@@ -218,6 +291,29 @@ class CodeGenerator(Generator):
         else:
             x = self.dict(kwargs['code']).transpose(1, 2)
 
+#############################################
+        dur_losses = 0.0
+        if self.dur_predictor:
+            if self.training:
+                # assume input code is always full sequence
+                uniq_code_feat, uniq_code_mask, dur = process_duration(
+                    kwargs['code'], x.transpose(1, 2))
+                log_dur_pred = self.dur_predictor(uniq_code_feat)
+                log_dur_pred = log_dur_pred[uniq_code_mask]
+                log_dur = torch.log(dur + 1)
+                dur_losses = F.mse_loss(log_dur_pred, log_dur, reduction="mean")
+            elif kwargs.get('dur_prediction', False):
+                # assume input code can be unique sequence only in eval mode
+                assert x.size(0) == 1, "only support single sample batch in inference"
+                log_dur_pred = self.dur_predictor(x.transpose(1, 2))
+                dur_out = torch.clamp(
+                    torch.round((torch.exp(log_dur_pred) - 1)).long(), min=1
+                )
+                # B x C x T
+                x = torch.repeat_interleave(x, dur_out.view(-1), dim=2)
+###################################################
+
+
         f0_commit_losses = None
         f0_metrics = None
         if self.vq:
@@ -249,9 +345,10 @@ class CodeGenerator(Generator):
 
         ####### Accent code ########
         if self.accent:
-            if 'accent' in kwargs:
-                id_to_take = kwargs['accent']
+            if 'accent_id' in kwargs:
+                id_to_take = kwargs['accent_id']
             else:
+                print("Are you sure????")
                 id_to_take = kwargs['spkr']
             accent = self.accent_lt(id_to_take).transpose(1, 2)
             # accent = self.accent_lt(torch.tensor([[107]],dtype=torch.int32).cuda()).transpose(1, 2)
@@ -261,7 +358,7 @@ class CodeGenerator(Generator):
 
         for k, feat in kwargs.items():
             # if k in ['spkr', 'code', 'f0']:
-            if k in ['spkr', 'code', 'f0', 'accent']:
+            if k in ['spkr', 'code', 'f0', 'accent_id']:
                 continue
 
             feat = self._upsample(feat, x.shape[-1])
@@ -270,7 +367,7 @@ class CodeGenerator(Generator):
         if self.vq or self.code_vq:
             return super().forward(x), (code_commit_losses, f0_commit_losses), (code_metrics, f0_metrics)
         else:
-            return super().forward(x)
+            return super().forward(x), dur_losses
 
 
 class DiscriminatorP(torch.nn.Module):

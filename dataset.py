@@ -8,6 +8,7 @@
 
 import random
 from pathlib import Path
+import pandas as pd
 
 import amfm_decompy.basic_tools as basic
 import amfm_decompy.pYAAPT as pYAAPT
@@ -160,7 +161,7 @@ class CodeDataset(torch.utils.data.Dataset):
                  hop_size, win_size, sampling_rate, fmin, fmax, split=True, n_cache_reuse=1,
                  device=None, fmax_loss=None, f0=None, multispkr=False, pad=None,
                  f0_stats=None, f0_normalize=False, f0_feats=False, f0_median=False,
-                 f0_interp=False, vqvae=False):
+                 f0_interp=False, vqvae=False, accent_embedding_by_accent=True):
         self.audio_files, self.codes = training_files
         random.seed(1234)
         self.segment_size = segment_size
@@ -189,13 +190,23 @@ class CodeDataset(torch.utils.data.Dataset):
             self.f0_stats = torch.load(f0_stats)
         self.multispkr = multispkr
         self.pad = pad
+        self.accent_embedding_by_accent = accent_embedding_by_accent
         if self.multispkr:
+            speakers_data_path = r"src/speakers_data.csv"
+            speakers_data = pd.read_csv(speakers_data_path).set_index('Id')
+            self.speakers_data_dict = speakers_data.to_dict('index')
+
             spkrs = [parse_speaker(f, self.multispkr) for f in self.audio_files]
             spkrs = list(set(spkrs))
             spkrs.sort()
 
             self.id_to_spkr = spkrs
             self.spkr_to_id = {k: v for v, k in enumerate(self.id_to_spkr)}
+            self.spkr_to_accent = {speaker: self.speakers_data_dict[speaker]['Accent'] for speaker in self.id_to_spkr}
+
+            id_to_accent_mapping_path = r"src/accent_model/id_to_accent_mapping.npy"
+            accent_mapping_dict = np.load(id_to_accent_mapping_path, allow_pickle=True).item()
+            self.accent_to_id_mapping = {v: k for k, v in accent_mapping_dict.items()}
 
             save_spkr_to_id = False
             if save_spkr_to_id:
@@ -293,6 +304,7 @@ class CodeDataset(torch.utils.data.Dataset):
 
         if self.multispkr:
             feats['spkr'] = self._get_spkr(index)
+            feats['accent_id'] = self._get_accent(index) if self.accent_embedding_by_accent else self._get_spkr(index) # todo: exists only id mapping embedding by the accent - need to fix
 
         if self.f0_normalize:
             spkr_id = self._get_spkr(index).item()
@@ -317,10 +329,17 @@ class CodeDataset(torch.utils.data.Dataset):
 
         return feats, audio.squeeze(0), str(filename), mel_loss.squeeze()
 
+
     def _get_spkr(self, idx):
         spkr_name = parse_speaker(self.audio_files[idx], self.multispkr)
         spkr_id = torch.LongTensor([self.spkr_to_id[spkr_name]]).view(1).numpy()
         return spkr_id
+
+    def _get_accent(self, idx):
+        spkr_name = parse_speaker(self.audio_files[idx], self.multispkr)
+        accent_name = self.spkr_to_accent[spkr_name]
+        accent_id = torch.LongTensor([self.accent_to_id_mapping[accent_name]]).view(1).numpy()
+        return accent_id
 
     def __len__(self):
         return len(self.audio_files)
