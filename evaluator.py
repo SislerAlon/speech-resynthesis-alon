@@ -22,6 +22,7 @@ class Evaluator:
         self.accent_m = accent_model.AccentModel()
         self.accent_mapping_dict = self.accent_m.get_accent_mapping()
         self.accent_to_id_dict = {v: k for k, v in self.accent_mapping_dict.items()}
+
         self.accent_list = list(self.accent_to_id_dict.keys())
 
         ## wev2vec2 section
@@ -69,7 +70,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     svm = sn.heatmap(accent_confusion_matrix, annot=False)
     plt.title(f'{output_name} accent confusion matrix')
     figure = svm.get_figure()
-    figure.savefig(f'evaloator_outputs/{output_name}_accent_confusion_matrix.png', dpi=1000)
+    figure.savefig(f'evaloator_outputs/{output_name}_accent_confusion_matrix.png', dpi=2000)
 
     accent_data = []
     for accent_name in accent_list:
@@ -82,12 +83,14 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
             res_data = {'accent_name': accent_name, 'accuracy': accuracy, 'recall': recall}
         accent_data.append(res_data)
     accent_df_results = pd.DataFrame(accent_data)
+    mean_accuracy = accent_df_results.accuracy.mean()
+    mean_recall = accent_df_results.recall.mean()
+    res_data = {'accent_name': 'mean', 'accuracy': mean_accuracy, 'recall': mean_recall}
+
+    accent_df_results.append(res_data, ignore_index=True)
+
     accent_df_results.to_csv(f'evaloator_outputs/{output_name}_accent_results.csv')
 
-
-    # calculate_stats(accent_confusion_matrix)
-    # Confusion_Matrix = ConfusionMatrix(y_actu_accent, y_pred_accent)
-    # Confusion_Matrix.print_stats()
 
     plt.figure()
     y_actu_speaker = data['base_speaker']
@@ -96,7 +99,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     svm = sn.heatmap(speaker_confusion_matrix, annot=False)
     plt.title(f'{output_name} speaker confusion matrix')
     figure = svm.get_figure()
-    figure.savefig(f'evaloator_outputs/{output_name}_speaker_confusion_matrix.png', dpi=1000)
+    figure.savefig(f'evaloator_outputs/{output_name}_speaker_confusion_matrix.png', dpi=2000)
 
 
     speaker_data = []
@@ -110,12 +113,14 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
             res_data = {'speaker_name': speaker_name, 'accuracy': accuracy, 'recall': recall}
         speaker_data.append(res_data)
     speaker_df_results = pd.DataFrame(speaker_data)
+    mean_accuracy = speaker_df_results.accuracy.mean()
+    mean_recall = speaker_df_results.recall.mean()
+    res_data = {'speaker_name': 'mean', 'accuracy': mean_accuracy, 'recall': mean_recall}
+
+    speaker_df_results.append(res_data, ignore_index=True)
     speaker_df_results.to_csv(f'evaloator_outputs/{output_name}_speaker_results.csv')
 
-    # calculate_stats(speaker_confusion_matrix)
 
-    # Confusion_Matrix = ConfusionMatrix(y_actu_speaker, y_pred_speaker)
-    # Confusion_Matrix.print_stats()
 
 
 def get_confusion_matrix(y_actu, y_pred, norm=False):
@@ -125,10 +130,6 @@ def get_confusion_matrix(y_actu, y_pred, norm=False):
     return df_confusion
 
 
-# def calc_accuracy_and_recall_per_index(confusion_matrix, chosen_index):
-#   accuracy = confusion_matrix[chosen_index,chosen_index] / confusion_matrix[chosen_index,:].sum()
-#   recall = confusion_matrix[chosen_index,chosen_index] / confusion_matrix[:,chosen_index].sum()
-#   return accuracy, recall
 
 def calc_accuracy_and_recall_per_index(confusion_matrix, chosen_index_name):
     mapping = {accent_name: index for index, accent_name in enumerate(confusion_matrix.columns)}

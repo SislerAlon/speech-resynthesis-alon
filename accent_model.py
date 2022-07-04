@@ -38,6 +38,10 @@ class AccentModel:
                                                                  savedir="pretrained_models/spkrec-xvect-voxceleb")
 
         self.id_to_accent_mapping = np.load(id_to_accent_mapping_path, allow_pickle=True).item()
+        ### patch ########
+        self.id_to_accent_mapping[10] = 'Welsh'
+        self.id_to_accent_mapping[11] = 'Unknown'
+        ##################
         with tf.device('/cpu:0'):
             self.accent_model = load_model(accent_model_path)
 
