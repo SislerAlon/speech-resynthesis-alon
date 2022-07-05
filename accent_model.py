@@ -18,7 +18,7 @@ else:
     # standard_scaler_dict_path = r"C:/git/Paccent_classifier/accent_scaler_dict_torch_accent.npy"
     # accent_model_path = r"C:/git/Paccent_classifier/x_vector_to_accent_with_64_dim_same_arch.h5"
     standard_scaler_dict_path = r"src/accent_model/accent_scaler_dict_torch_accent.npy"
-    accent_model_path = r"src/accent_model/x_vector_to_accent_with_64_dim_same_arch.h5"
+    accent_model_path = r"src/accent_model/x_vector_to_accent_with_64_dim_same_arch_12_classes.h5"
 
 # id_to_accent_mapping_path = r"C:/git/Paccent_classifier/id_to_accent_mapping.npy"
 id_to_accent_mapping_path = r"src/accent_model/id_to_accent_mapping.npy"
@@ -38,10 +38,7 @@ class AccentModel:
                                                                  savedir="pretrained_models/spkrec-xvect-voxceleb")
 
         self.id_to_accent_mapping = np.load(id_to_accent_mapping_path, allow_pickle=True).item()
-        ### patch ########
-        self.id_to_accent_mapping[10] = 'Welsh'
-        self.id_to_accent_mapping[11] = 'Unknown'
-        ##################
+
         with tf.device('/cpu:0'):
             self.accent_model = load_model(accent_model_path)
 
