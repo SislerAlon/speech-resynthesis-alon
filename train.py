@@ -28,16 +28,16 @@ from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, \
     save_checkpoint, build_env, AttrDict
 
 
-import speaker_model
-import numpy as np
-import librosa
-import soundfile as sf
+# import speaker_model
+# import numpy as np
+# import librosa
+# import soundfile as sf
 
 
 torch.backends.cudnn.benchmark = True
 
 
-
+import evaluator
 
 
 
@@ -127,8 +127,21 @@ def train(rank, local_rank, a, h):
 
         sw = SummaryWriter(os.path.join(a.checkpoint_path, 'logs'))
 
-    # spk_model = speaker_model.SpeakerModel()
-    # speaker_loss = torch.nn.CrossEntropyLoss()
+    speakers_list = trainset.id_to_spkr
+    evaluator_models = evaluator.Evaluator(speakers_list=speakers_list)
+    add_speaker_loss = True
+    add_accent_loss = True
+    speaker_loss = torch.nn.CrossEntropyLoss()
+    accent_loss = torch.nn.CrossEntropyLoss()
+    speaker_const = 10.
+    accent_const = 10.
+
+
+    accent_to_id_mapping = trainset.accent_to_id_mapping
+    add_multi_accent_loss = True
+
+    multi_accent_loss = torch.nn.CrossEntropyLoss()
+    multi_accent_const = accent_const / 10.
 
 
     generator.train()
@@ -187,15 +200,6 @@ def train(rank, local_rank, a, h):
             # Generator
             optim_g.zero_grad()
 
-            # # speaker loss
-            # # speaker_hat = spk_model(y_g_hat.cpu().detach().squeeze())
-            # data1, sampling_rate1 = sf.read(file_name_list[1])
-            # speaker_hat = spk_model(data1)
-            # # speaker_hat = spk_model(librosa.util.normalize(y_g_hat.cpu().detach().numpy().squeeze().astype(np.float32)))
-            # # speaker_loss(x['spkr'],speaker_hat)
-            # # accent loss
-
-
             # L1 Mel-Spectrogram Loss
             loss_mel = F.l1_loss(y_mel, y_g_hat_mel) * 45
 
@@ -213,6 +217,40 @@ def train(rank, local_rank, a, h):
             if h.get('dur_prediction_weight', None):
                 loss_gen_all += dur_losses * h.get('dur_prediction_weight', None)
 
+
+            if add_speaker_loss:
+                classified_speaker = evaluator_models.evaluate_speaker(y_g_hat.cpu().detach(), final_prediction=False)
+                speaker_loss_val = speaker_const * speaker_loss(torch.Tensor(classified_speaker).cpu(), x['spkr'].cpu().detach().squeeze())
+                loss_gen_all += speaker_loss_val
+            if add_accent_loss:
+                classified_accent = evaluator_models.evaluate_accent(y_g_hat.cpu().detach(), final_prediction=False)
+                accent_loss_val = accent_const * accent_loss(torch.Tensor(classified_accent).cpu(), x['accent_id'].cpu().detach().squeeze())
+                loss_gen_all += accent_loss_val
+
+            if add_multi_accent_loss:
+                # todo: ignore current accent value? - original_accent_id_list
+                original_accent_id_list = x['accent_id']
+                x_modify = x.copy()
+                multi_accent_losses_dict_train = {}
+                for accent_name, accent_ID in accent_to_id_mapping.items():
+                    if accent_name == 'Unknown':
+                        continue
+                    # Modify X
+                    x_modify['accent_id'] = torch.full((h.batch_size, 1), accent_ID).to(device)
+
+                    # generate accents
+                    y_g_hat, dur_losses = generator(**x_modify)
+
+                    # classify accent
+                    classified_accent = evaluator_models.evaluate_accent(y_g_hat.cpu().detach(), final_prediction=False)
+                    # add loss
+                    # filter the current accent?
+                    multi_accent_loss_val = multi_accent_const * multi_accent_loss(torch.Tensor(classified_accent).cpu(),
+                                                                 x_modify['accent_id'].cpu().detach().squeeze())
+                    multi_accent_losses_dict_train[accent_name] = multi_accent_loss_val
+                    loss_gen_all += multi_accent_loss_val
+
+
             loss_gen_all.backward()
             optim_g.step()
 
@@ -221,11 +259,24 @@ def train(rank, local_rank, a, h):
                 if steps % a.stdout_interval == 0:
                     with torch.no_grad():
                         mel_error = F.l1_loss(y_mel, y_g_hat_mel).item()
+                        if add_speaker_loss:
+                            classified_speaker = evaluator_models.evaluate_speaker(y_g_hat.cpu().detach(),
+                                                                                   final_prediction=False)
+                            speaker_loss_val = speaker_const * speaker_loss(torch.Tensor(classified_speaker).cpu(),
+                                                                            x['spkr'].cpu().detach().squeeze())
+                        if add_accent_loss:
+                            classified_accent = evaluator_models.evaluate_accent(y_g_hat.cpu().detach(),
+                                                                                 final_prediction=False)
+                            accent_loss_val = accent_const * accent_loss(torch.Tensor(classified_accent).cpu(),
+                                                                         x['accent_id'].cpu().detach().squeeze())
+
 
                     print(
-                        'Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f}, s/b : {:4.3f}'.format(steps,
+                        'Steps : {:d}, Gen Loss Total : {:4.3f}, Mel-Spec. Error : {:4.3f},Speaker Error : {:4.3f},Accent Error : {:4.3f}, s/b : {:4.3f}'.format(steps,
                                                                                                                   loss_gen_all,
                                                                                                                   mel_error,
+                                                                                                                  speaker_loss_val,
+                                                                                                                  accent_loss_val,
                                                                                                                   time.time() - start_b))
 
                 # checkpointing
@@ -243,6 +294,19 @@ def train(rank, local_rank, a, h):
                 if steps % a.summary_interval == 0:
                     sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
+                    if add_speaker_loss:
+                        sw.add_scalar("training/speaker_loss", speaker_loss_val, steps)
+                    if add_accent_loss:
+                        sw.add_scalar("training/accent_loss", accent_loss_val, steps)
+                    if add_multi_accent_loss:
+                        for accent_name, accent_ID in accent_to_id_mapping.items():
+                            if accent_name == 'Unknown':
+                                continue
+                            sw.add_scalar(f"training/multi_accent_classification_error_{accent_name}",
+                                          multi_accent_losses_dict_train[accent_name], steps)
+
+
+
                     if h.get('f0_vq_params', None):
                         sw.add_scalar("training/commit_error", f0_commit_loss, steps)
                         sw.add_scalar("training/used_curr", f0_metrics['used_curr'].item(), steps)
@@ -259,6 +323,8 @@ def train(rank, local_rank, a, h):
                     generator.eval()
                     torch.cuda.empty_cache()
                     val_err_tot = 0
+                    speaker_loss_val_tot = 0
+                    accent_loss_val_tot = 0
                     with torch.no_grad():
                         for j, batch in enumerate(validation_loader):
                             x, y, _, y_mel = batch
@@ -282,6 +348,48 @@ def train(rank, local_rank, a, h):
                                                           h.hop_size, h.win_size, h.fmin, h.fmax_for_loss)
                             val_err_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
 
+                            if add_speaker_loss:
+                                classified_speaker = evaluator_models.evaluate_speaker(y_g_hat.cpu().detach(),
+                                                                                       final_prediction=False)
+                                speaker_loss_val_tot += speaker_const * speaker_loss(torch.Tensor(classified_speaker).cpu(),
+                                                                                x['spkr'].cpu().detach().squeeze())
+                                # val_err_tot += speaker_loss_val
+                            if add_accent_loss:
+                                classified_accent = evaluator_models.evaluate_accent(y_g_hat.cpu().detach(),
+                                                                                     final_prediction=False)
+                                accent_loss_val_tot += accent_const * accent_loss(torch.Tensor(classified_accent).cpu(),
+                                                                             x['accent_id'].cpu().detach().squeeze())
+                                # val_err_tot += accent_loss_val
+
+                            if add_multi_accent_loss:
+                                # todo: ignore current accent value? - original_accent_id_list
+                                original_accent_id_list = x['accent_id']
+                                multi_accent_losses_dict_validation = {}
+                                x_modify = x.copy()
+                                for accent_name, accent_ID in accent_to_id_mapping.items():
+                                    if accent_name == 'Unknown':
+                                        continue
+                                    # Modify X
+                                    x_modify['accent_id'] = torch.full((h.batch_size, 1), accent_ID).to(device)
+
+                                    # generate accents
+                                    y_g_hat, dur_losses = generator(**x_modify)
+
+                                    # classify accent
+                                    classified_accent = evaluator_models.evaluate_accent(y_g_hat.cpu().detach(),
+                                                                                         final_prediction=False)
+                                    # add loss
+                                    # filter the current accent?
+                                    multi_accent_loss_val = multi_accent_const * multi_accent_loss(
+                                        torch.Tensor(classified_accent).cpu(),
+                                        x_modify['accent_id'].cpu().detach().squeeze())
+                                    if accent_name in multi_accent_losses_dict_validation:
+                                        multi_accent_losses_dict_validation[accent_name] += multi_accent_loss_val
+                                    else:
+                                        multi_accent_losses_dict_validation[accent_name] = multi_accent_loss_val
+
+
+
                             if j <= 4:
                                 if steps == 0:
                                     sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
@@ -295,6 +403,23 @@ def train(rank, local_rank, a, h):
 
                         val_err = val_err_tot / (j + 1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
+                        if add_speaker_loss:
+                            speaker_loss_val_err = speaker_loss_val_tot / (j + 1)
+                            sw.add_scalar("validation/speaker_classification_error", speaker_loss_val_err, steps)
+
+                        if add_accent_loss:
+                            accent_loss_val_err = accent_loss_val_tot / (j + 1)
+                            sw.add_scalar("validation/accent_classification_error", accent_loss_val_err, steps)
+
+                        if add_multi_accent_loss:
+                            for accent_name, accent_ID in accent_to_id_mapping.items():
+                                if accent_name == 'Unknown':
+                                    continue
+
+                                multi_accent_loss_val_tot = multi_accent_losses_dict_validation[accent_name]
+                                multi_accent_loss_val_err = multi_accent_loss_val_tot / (j + 1)
+                                sw.add_scalar(f"validation/multi_accent_classification_error_{accent_name}", multi_accent_loss_val_err, steps)
+
                         if h.get('f0_vq_params', None):
                             sw.add_scalar("validation/commit_error", f0_commit_loss, steps)
                         if h.get('code_vq_params', None):
@@ -321,15 +446,17 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--checkpoint_path', default='checkpoints/VCTK_vqvae_accent_speaker_duration_by_accent')
+    parser.add_argument('--checkpoint_path', default='checkpoints/multi_accent_loss')
     parser.add_argument('--config', default='configs/VCTK/hubert100_lut.json')
     parser.add_argument('--training_epochs', default=2000, type=int)
     parser.add_argument('--training_steps', default=400000, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
-    parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    # parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    parser.add_argument('--checkpoint_interval', default=2500, type=int)
     # parser.add_argument('--checkpoint_interval', default=250, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
-    parser.add_argument('--validation_interval', default=1000, type=int)
+    # parser.add_argument('--validation_interval', default=1000, type=int)
+    parser.add_argument('--validation_interval', default=500, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)
     parser.add_argument('--local_rank', default=0, type=int)
     parser.add_argument('--distributed-world-size', type=int)

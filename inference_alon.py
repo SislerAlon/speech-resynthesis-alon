@@ -195,13 +195,16 @@ class GenerateWaveform:
         # re-synth
         re_synth_orig = True
         if re_synth_orig:
-            audio, rtf = generate(self.h, self.generator, new_code)
-            # output_file = os.path.join(self.output_dir, fname_out_name + '_gen_orig.wav')
             output_file = os.path.join(self.output_dir, fname_out_name + f'_speaker_{original_speaker}_accent_{original_accent}_gen-orig.wav')
             sound_file_output_path['gt_gen'] = output_file
+            if not Path(output_file).exists():
 
-            audio = librosa.util.normalize(audio.astype(np.float32))
-            write(output_file, self.h.sampling_rate, audio)
+                audio, rtf = generate(self.h, self.generator, new_code)
+                # output_file = os.path.join(self.output_dir, fname_out_name + '_gen_orig.wav')
+
+                audio = librosa.util.normalize(audio.astype(np.float32))
+                # audio_backup = audio.copy()
+                write(output_file, self.h.sampling_rate, audio)
 
         # if self.h.get('multispkr', None) and self.a.vc:
         if original_speaker != target_speaker or original_accent != target_accent:
@@ -217,8 +220,8 @@ class GenerateWaveform:
                 # Not use
                 if self.a.f0_stats and self.h.get('f0', None) is not None and not self.h.get('f0_normalize', False):
                     spkr = k
-                    # f0 = code['f0'].clone()
-                    f0 = new_code['f0'].clone()
+                    f0 = code['f0'].clone() # new
+                    # f0 = new_code['f0'].clone() # new
 
                     ii = (f0 != 0)
                     mean_, std_ = f0[ii].mean(), f0[ii].std()
@@ -231,8 +234,8 @@ class GenerateWaveform:
                     f0[ii] /= std_
                     f0[ii] *= new_std_
                     f0[ii] += new_mean_
-                    # code['f0'] = f0
-                    new_code['f0'] = f0
+                    code['f0'] = f0 #new
+                    # new_code['f0'] = f0 #new
 
                 # Not use
                 if self.h.get('f0_feats', False):
@@ -246,20 +249,22 @@ class GenerateWaveform:
                     # code['f0_stats'] = torch.FloatTensor([mean, std]).view(1, -1).to(device)
                     new_code['f0_stats'] = torch.FloatTensor([mean, std]).view(1, -1).to(device)
 
-                audio, rtf = generate(self.h, self.generator, code)
-                # audio, rtf = generate(self.h, self.generator, new_code)
 
                 output_file = os.path.join(self.output_dir, fname_out_name + f'_speaker_{target_speaker}_accent_{target_accent}_gen.wav')
                 sound_file_output_path['new'] = output_file
-                audio = librosa.util.normalize(audio.astype(np.float32))
-                write(output_file, self.h.sampling_rate, audio)
+                if not Path(output_file).exists():
+                    audio, rtf = generate(self.h, self.generator, code)
+                    # audio, rtf = generate(self.h, self.generator, new_code)
+                    audio = librosa.util.normalize(audio.astype(np.float32))
+                    write(output_file, self.h.sampling_rate, audio)
 
         if gt_audio is not None:
             # output_file = os.path.join(self.output_dir, fname_out_name + '_gt.wav')
             output_file = os.path.join(self.output_dir, fname_out_name + f'_accent_{original_accent}_gt.wav')
-            gt_audio = librosa.util.normalize(gt_audio.squeeze().numpy().astype(np.float32))
             sound_file_output_path['gt'] = output_file
-            write(output_file, self.h.sampling_rate, gt_audio)
+            if not Path(output_file).exists():
+                gt_audio = librosa.util.normalize(gt_audio.squeeze().numpy().astype(np.float32))
+                write(output_file, self.h.sampling_rate, gt_audio)
 
         return sound_file_output_path
 
@@ -273,8 +278,8 @@ def init_generator(main_output_path='D:/Thesis/generated_results'):
     parser.add_argument('--input_code_file', default='./datasets/VCTK/hubert100/test.txt')
     parser.add_argument('--output_dir', default=f'{main_output_path}/generated_files_accent_change_double_zero_accent_duration')
     # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae_accent_speaker')  # , required=True)
-    # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae_accent_speaker_duration')  # , required=True)
-    parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae_accent_speaker_duration_by_accent')  # , required=True)
+    # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_global_accent_accent_and_spealer_loss2')  # , required=True)
+    parser.add_argument('--checkpoint_file', default='checkpoints/run_on_inf')  # , required=True)
     # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae', required=True)
     parser.add_argument('--f0-stats', type=Path)
     parser.add_argument('--vc', action='store_true')

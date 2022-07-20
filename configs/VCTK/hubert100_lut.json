@@ -29,6 +29,16 @@
     "n_fft": 1024,
     "hop_size": 256,
     "win_size": 1024,
+	
+	"Accent_embedding_by_accent": true,
+
+    "dur_prediction_weight": 1.0,
+    "dur_predictor_params": {
+        "encoder_embed_dim": 128,
+        "var_pred_hidden_dim": 128,
+        "var_pred_kernel_size": 3,
+        "var_pred_dropout": 0.5
+    },
 
     "f0_stats": "datasets/VCTK/f0_stats.th",
     "f0_normalize": true,

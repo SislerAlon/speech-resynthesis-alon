@@ -34,18 +34,32 @@ class Evaluator:
 
         self.speakers_list = speakers_list
 
-    def evaluate_accent(self, waveform_path, final_prediction=True):
-        waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
-        output_distribution = self.accent_m(torch.Tensor(np.expand_dims(waveform, axis=0)))
+    def evaluate_accent(self, waveform_path, final_prediction=True, get_waveform_path=False):
+        if get_waveform_path:
+            waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
+        else:
+            waveform = waveform_path
+
+        if isinstance(waveform, torch.Tensor):
+            output_distribution = self.accent_m(waveform.squeeze())
+        else:
+            output_distribution = self.accent_m(torch.Tensor(np.expand_dims(waveform, axis=0)))
+
         if final_prediction:
             output_accent = self.accent_mapping_dict[np.argmax(output_distribution)]
         else:
             output_accent = output_distribution
         return output_accent
 
-    def evaluate_speaker(self, waveform_path, final_prediction=True):
-        waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
-        output_distribution = self.speaker_m(torch.Tensor(waveform).unsqueeze(0))
+    def evaluate_speaker(self, waveform_path, final_prediction=True, get_waveform_path=False):
+        if get_waveform_path:
+            waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
+        else:
+            waveform = waveform_path
+        if isinstance(waveform, torch.Tensor):
+            output_distribution = self.speaker_m(waveform.squeeze())
+        else:
+            output_distribution = self.speaker_m(torch.Tensor(waveform).unsqueeze(0))
         if final_prediction:
             output_speaker = self.speakers_list[np.argmax(output_distribution)]
         else:
@@ -76,7 +90,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     for accent_name in accent_list:
         if accent_name not in accent_confusion_matrix.keys():
             print(f'there is no {accent_name} in the results')
-            res_data = {'accent_name': accent_name, 'accuracy': 0.0, 'recall': 0.0}
+            res_data = {'accent_name': accent_name, 'accuracy': np.nan, 'recall': np.nan}
         else:
             # calc_accuracy_and_recall_per_index(accent_confusion_matrix, 'American')
             accuracy, recall = calc_accuracy_and_recall_per_index(accent_confusion_matrix, accent_name)
@@ -87,8 +101,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     mean_recall = accent_df_results.recall.mean()
     res_data = {'accent_name': 'mean', 'accuracy': mean_accuracy, 'recall': mean_recall}
 
-    accent_df_results.append(res_data, ignore_index=True)
-
+    accent_df_results = accent_df_results.append(res_data, ignore_index=True)
     accent_df_results.to_csv(f'evaloator_outputs/{output_name}_accent_results.csv')
 
 
@@ -101,12 +114,12 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     figure = svm.get_figure()
     figure.savefig(f'evaloator_outputs/{output_name}_speaker_confusion_matrix.png', dpi=2000)
 
-
+    # Todo: Add here the speaker_name accent!
     speaker_data = []
     for speaker_name in speakers_list:
         if speaker_name not in speaker_confusion_matrix.keys():
             print(f'there is no {speaker_name} in the results')
-            res_data = {'speaker_name': speaker_name, 'accuracy': 0.0, 'recall': 0.0}
+            res_data = {'speaker_name': speaker_name, 'accuracy': np.nan, 'recall': np.nan}
         else:
             # calc_accuracy_and_recall_per_index(speaker_confusion_matrix, 'American')
             accuracy, recall = calc_accuracy_and_recall_per_index(speaker_confusion_matrix, speaker_name)
@@ -117,7 +130,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     mean_recall = speaker_df_results.recall.mean()
     res_data = {'speaker_name': 'mean', 'accuracy': mean_accuracy, 'recall': mean_recall}
 
-    speaker_df_results.append(res_data, ignore_index=True)
+    speaker_df_results = speaker_df_results.append(res_data, ignore_index=True)
     speaker_df_results.to_csv(f'evaloator_outputs/{output_name}_speaker_results.csv')
 
 
@@ -141,6 +154,7 @@ def calc_accuracy_and_recall_per_index(confusion_matrix, chosen_index_name):
 
 
 def calc_accuracy_and_recall_all_indexs(confusion_matrix):
+    # not in use
     numerator = 0
     denominator_accuracy = 0
     denominator_recall = 0
@@ -223,10 +237,9 @@ def main():
 
             gt = True if path_split[-1] == 'gt' else False
             gen_orig = True if path_split[-1] == 'gen-orig' else False
-
-            classified_speaker = evaluator.evaluate_speaker(waveform_path)
+            classified_speaker = evaluator.evaluate_speaker(waveform_path,final_prediction=True, get_waveform_path=True)
             classified_transcription = evaluator.evaluate_transcription(waveform_path)
-            classified_accent = evaluator.evaluate_accent(waveform_path)
+            classified_accent = evaluator.evaluate_accent(waveform_path,final_prediction=True, get_waveform_path=True)
             data = {'waveform_path': waveform_path,
                     'base_speaker': base_speaker,
                     'base_accent': base_accent,

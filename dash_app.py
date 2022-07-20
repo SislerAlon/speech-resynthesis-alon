@@ -120,7 +120,7 @@ MENU = [
     ),
 ]
 
-# GRAFICOS = [dcc.Graph(id="line-chart"), dcc.Graph(id="donut-chart")]
+GRAFICOS = [dcc.Graph(id="waveform")]
 
 app = dash.Dash(__name__)
 app.layout = html.Div(
@@ -136,10 +136,6 @@ app.layout = html.Div(
                     id="menu",
                     children=MENU,
                 ),
-                # html.Div(
-                #     id="graphs",
-                #     children=GRAFICOS,
-                # ),
                 html.Audio(title='gt',
                            id='gt_player',
                            src='data:audio/mpeg;base64,{}'.format(data_sound.decode()),
@@ -170,6 +166,10 @@ app.layout = html.Div(
                 html.Div(id='new_gen_Accent_results'),
                 html.Div(id='new_gen_speaker_results'),
                 html.Div(id='new_gen_transcription_results'),
+                html.Div(
+                    id="graphs",
+                    children=GRAFICOS,
+                ),
             ],
             id="content",
         ),
@@ -182,6 +182,33 @@ def get_src_from_sound_file_path(data_sound_file):
     data_sound = base64.b64encode(open(data_sound_file, 'rb').read())
     return 'data:audio/mpeg;base64,{}'.format(data_sound.decode())
 
+
+def generate_plot(waveform_path_dict):
+    gt_waveform ,Librosa_sample_rate = librosa.load(waveform_path_dict['gt'], sr=16_000)
+    gt_gen_waveform ,Librosa_sample_rate = librosa.load(waveform_path_dict['gt_gen'], sr=16_000)
+    if 'new' in waveform_path_dict.keys():
+        new_waveform ,Librosa_sample_rate = librosa.load(waveform_path_dict['new'], sr=16_000)
+
+
+    data_dict = {'Ground Truth': gt_waveform,
+                 'Resynthesis': gt_gen_waveform,
+                 'New': new_waveform}
+
+    df = pd.DataFrame(data_dict)
+    fig = px.line(df, render_mode="webgl")
+
+    fig.update_layout(
+        height=500,
+        margin_r=0,
+        margin_l=0,
+        margin_t=0,
+        yaxis_title="",
+        yaxis_fixedrange=True,
+    )
+
+    fig.update_traces(line=dict(width=1), opacity=.5)
+
+    return fig
 
 # def get_transcription_from_waveform(waveform_path):
 #     waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
@@ -269,6 +296,7 @@ def random_speaker_and_accent(keep_anonymous):
         Output('new_gen_Accent_results', "children"),
         Output('new_gen_speaker_results', "children"),
         Output('new_gen_transcription_results', "children"),
+        Output('waveform', "figure"),
     ],
     [
         Input("base_speaker_selector", "value"),
@@ -300,19 +328,19 @@ def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_inde
     # utterance_options = [{"label": str(r), "value": r} for r in range(number_of_utterance)]
 
     utterance_data_list = speaker_to_dataset_index[base_speaker]
-    utterance_options = [{"label": f'{index}_{values["transcription"]}', "value": index} for index,values in enumerate(utterance_data_list)]
+    utterance_options = [{"label": f'{index}_{values["transcription"]}', "value": index} for index, values in enumerate(utterance_data_list)]
 
-    gt_accent = evaluator_model.evaluate_accent(sound_file_output_path['gt'])
-    gt_gen_accent = evaluator_model.evaluate_accent(sound_file_output_path['gt_gen'])
+    gt_accent = evaluator_model.evaluate_accent(sound_file_output_path['gt'], final_prediction=True, get_waveform_path=True)
+    gt_gen_accent = evaluator_model.evaluate_accent(sound_file_output_path['gt_gen'],final_prediction=True, get_waveform_path=True)
     if 'new' in sound_file_output_path.keys():
-        new_accent = evaluator_model.evaluate_accent(sound_file_output_path['new'])
+        new_accent = evaluator_model.evaluate_accent(sound_file_output_path['new'],final_prediction=True, get_waveform_path=True)
     else:
         new_accent = gt_gen_accent
 
-    gt_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['gt'])
-    gt_gen_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['gt_gen'])
+    gt_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['gt'],final_prediction=True, get_waveform_path=True)
+    gt_gen_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['gt_gen'],final_prediction=True, get_waveform_path=True)
     if 'new' in sound_file_output_path.keys():
-        new_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['new'])
+        new_speaker = evaluator_model.evaluate_speaker(sound_file_output_path['new'],final_prediction=True, get_waveform_path=True)
     else:
         new_speaker = gt_gen_speaker
 
@@ -322,6 +350,10 @@ def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_inde
         new_transcription = evaluator_model.evaluate_transcription(sound_file_output_path['new'])
     else:
         new_transcription = gt_gen_transcription
+
+
+    # figure
+    fig = generate_plot(sound_file_output_path)
 
     return gt_src, \
            gt_gen_src, \
@@ -335,7 +367,8 @@ def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_inde
            gt_gen_transcription, \
            new_accent, \
            new_speaker, \
-           new_transcription
+           new_transcription, \
+           fig
 
 # @app.callback(
 #     [
