@@ -16,6 +16,7 @@ speaker_model_path = r"src/speaker_model/waveform_to_speaker_emb_mod_small.h5"
 
 class SpeakerModel:
     def __init__(self):
+        print("Load Speaker model")
         standard_scaler_dict = np.load(standard_scaler_dict_path, allow_pickle=True).item()
         self.mean = standard_scaler_dict['mean']
         self.scale = standard_scaler_dict['scale']

@@ -26,6 +26,7 @@ id_to_accent_mapping_path = r"src/accent_model/id_to_accent_mapping.npy"
 
 class AccentModel:
     def __init__(self):
+        print("Load Accent model")
         standard_scaler_dict = np.load(standard_scaler_dict_path, allow_pickle=True).item()
         self.mean = standard_scaler_dict['mean']
         self.scale = standard_scaler_dict['scale']
