@@ -1,7 +1,10 @@
+import pathlib
+
 import librosa
 import numpy as np
 import pandas as pd
 import torch
+import torchaudio
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -11,10 +14,12 @@ import accent_model
 import speaker_model
 import inference_alon
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-# from pandas_ml import ConfusionMatrix
+
+from UTMOS.mos_predictor import MosModel
 
 from tqdm import tqdm
 
+output_dir_name = 'evaloator_outputs_global_accent_accent_and_spealer_loss2'
 
 class Evaluator:
     def __init__(self, speakers_list):
@@ -33,6 +38,10 @@ class Evaluator:
         self.speaker_m = speaker_model.SpeakerModel()
 
         self.speakers_list = speakers_list
+
+
+        ## MOS predictor section
+        self.mos_model = MosModel()
 
     def evaluate_accent(self, waveform_path, final_prediction=True):
         waveform, Librosa_sample_rate = librosa.load(waveform_path, sr=16_000)
@@ -61,6 +70,10 @@ class Evaluator:
         transcription = self.processor_wav2vec2.batch_decode(predicted_ids)
         return transcription[0]
 
+    def evaluate_MOS(self, waveform_path):
+        wav, sr = torchaudio.load(waveform_path)
+        assert sr == 16_000, "waveform sample rate is not 16,000!!!!!"
+        return self.mos_model(wav)
 
 def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, output_name):
     plt.figure()
@@ -70,7 +83,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     svm = sn.heatmap(accent_confusion_matrix, annot=False,xticklabels=accent_confusion_mapping.keys(), yticklabels=accent_confusion_mapping.keys())
     plt.title(f'{output_name} accent confusion matrix')
     figure = svm.get_figure()
-    figure.savefig(f'evaloator_outputs_baseline/{output_name}_accent_confusion_matrix.png', dpi=2000)
+    figure.savefig(f'{output_dir_name}/{output_name}_accent_confusion_matrix.png', dpi=2000)
 
 
     accent_data = []
@@ -96,7 +109,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     temp_df = pd.DataFrame(res_data, index=[0])
     accent_df_results = pd.concat([accent_df_results, temp_df], ignore_index=True)
 
-    accent_df_results.to_csv(f'evaloator_outputs_baseline/{output_name}_accent_results.csv')
+    accent_df_results.to_csv(f'{output_dir_name}/{output_name}_accent_results.csv')
 
 
     plt.figure()
@@ -106,7 +119,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     svm = sn.heatmap(speaker_confusion_matrix, annot=False)
     plt.title(f'{output_name} speaker confusion matrix')
     figure = svm.get_figure()
-    figure.savefig(f'evaloator_outputs_baseline/{output_name}_speaker_confusion_matrix.png', dpi=2000)
+    figure.savefig(f'{output_dir_name}/{output_name}_speaker_confusion_matrix.png', dpi=2000)
 
 
     speaker_data = []
@@ -129,7 +142,7 @@ def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, ou
     # speaker_df_results.append(res_data, ignore_index=True)
     temp_df = pd.DataFrame(res_data, index=[0])
     speaker_df_results = pd.concat([speaker_df_results, temp_df], ignore_index=True)
-    speaker_df_results.to_csv(f'evaloator_outputs_baseline/{output_name}_speaker_results.csv')
+    speaker_df_results.to_csv(f'{output_dir_name}/{output_name}_speaker_results.csv')
 
 
 
@@ -236,7 +249,7 @@ def calculate_stats(confusion_matrix):
 
 def main():
     # output_path = r'C:/git/speech-resynthesis-alon/tmp/new_loss_model'
-    output_path = r'C:/git/speech-resynthesis-alon/tmp/Baseline_model'
+    output_path = rf'C:/git/speech-resynthesis-alon/tmp/{output_dir_name}'
     generator = inference_alon.init_generator(output_path)
     speakers_list = generator.dataset.id_to_spkr
     speaker_to_dataset_index = generator.get_index_by_speaker()
@@ -245,8 +258,11 @@ def main():
     evaluator = Evaluator(speakers_list=speakers_list)
     accent_list = evaluator.accent_list
 
-    csv_output_path = Path('evaluation_results_Baseline.csv')
+
+
+    csv_output_path = Path(f'{output_dir_name}/{output_dir_name}.csv')
     if not csv_output_path.exists():
+        Path(f'{output_dir_name}').mkdir(parents=True, exist_ok=True)
         output_waveforms = set()
         for uttrerance_index, (code, gt_audio, filename, _) in tqdm(enumerate(generator.dataset)):
             # original_speaker = generator.dataset.id_to_spkr[int(code['spkr'][0][0])]
@@ -263,9 +279,10 @@ def main():
 
 
         output_waveforms = list(output_waveforms)
-        output_dir = Path(r'C:\git\speech-resynthesis-alon\tmp\Baseline_model\generated_files_accent_change_double_zero_accent_duration').glob(
-            '**/*')
-        output_waveforms = [x for x in output_dir if x.is_file()]
+        output_waveforms = [pathlib.Path(file) for file in output_waveforms]
+        # output_dir = Path(r'C:\git\speech-resynthesis-alon\tmp\evaloator_outputs_balance_dataset_step_500\balance_dataset').glob(
+        #     '**/*')
+        # output_waveforms = [x for x in output_dir if x.is_file()]
 
         results_list = []
 
@@ -282,6 +299,7 @@ def main():
             classified_speaker = evaluator.evaluate_speaker(waveform_path)
             classified_transcription = evaluator.evaluate_transcription(waveform_path)
             classified_accent = evaluator.evaluate_accent(waveform_path)
+            predicted_mos = evaluator.evaluate_MOS(waveform_path)
 
             same_speaker = classified_speaker == base_speaker
             same_accent = classified_accent == target_accent
@@ -293,6 +311,7 @@ def main():
                     'classified_speaker': classified_speaker,
                     'classified_accent': classified_accent,
                     'classified_transcription': classified_transcription,
+                    'predicted_mos': predicted_mos,
                     'ground_truth': gt,
                     'original_generated': gen_orig,
                     'same_speaker': same_speaker,

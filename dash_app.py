@@ -53,7 +53,7 @@ speaker_to_dataset_index = GENERATOR.get_index_by_speaker()
 # model_wav2vec2l = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
 
 
-evaluator_model = evaluator.Evaluator(speakers_list=speakers_list)
+evaluator_model = evaluator.Evaluator(speakers_list=speakers_list,wav2vec2=True)
 
 
 
@@ -146,6 +146,7 @@ app.layout = html.Div(
                 html.Div(id='Base_Accent_results'),
                 html.Div(id='Base_speaker_results'),
                 html.Div(id='Base_transcription_results'),
+                html.Div(id='Base_mos_results'),
                 html.Audio(title='gt_gen',
                            id='gt_gen_player',
                            src='data:audio/mpeg;base64,{}'.format(data_sound.decode()),
@@ -156,6 +157,7 @@ app.layout = html.Div(
                 html.Div(id='gt_gen_Accent_results'),
                 html.Div(id='gt_gen_speaker_results'),
                 html.Div(id='gt_gen_transcription_results'),
+                html.Div(id='gt_gen_mos_results'),
                 html.Audio(title='new_gen',
                            id='new_player',
                            src='data:audio/mpeg;base64,{}'.format(data_sound.decode()),
@@ -166,6 +168,7 @@ app.layout = html.Div(
                 html.Div(id='new_gen_Accent_results'),
                 html.Div(id='new_gen_speaker_results'),
                 html.Div(id='new_gen_transcription_results'),
+                html.Div(id='new_gen_mos_results'),
                 html.Div(
                     id="graphs",
                     children=GRAFICOS,
@@ -290,12 +293,15 @@ def random_speaker_and_accent(keep_anonymous):
         Output('Base_Accent_results', "children"),
         Output('Base_speaker_results', "children"),
         Output('Base_transcription_results', "children"),
+        Output('Base_mos_results', "children"),
         Output('gt_gen_Accent_results', "children"),
         Output('gt_gen_speaker_results', "children"),
         Output('gt_gen_transcription_results', "children"),
+        Output('gt_gen_mos_results', "children"),
         Output('new_gen_Accent_results', "children"),
         Output('new_gen_speaker_results', "children"),
         Output('new_gen_transcription_results', "children"),
+        Output('new_gen_mos_results', "children"),
         Output('waveform', "figure"),
     ],
     [
@@ -352,6 +358,14 @@ def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_inde
         new_transcription = gt_gen_transcription
 
 
+    gt_mos = evaluator_model.evaluate_MOS(sound_file_output_path['gt'])
+    gt_gen_mos = evaluator_model.evaluate_MOS(sound_file_output_path['gt_gen'])
+    if 'new' in sound_file_output_path.keys():
+        new_mos = evaluator_model.evaluate_MOS(sound_file_output_path['new'])
+    else:
+        new_mos = gt_gen_mos
+
+
     # figure
     fig = generate_plot(sound_file_output_path)
 
@@ -362,12 +376,15 @@ def update_graphs(base_speaker, target_speaker, target_accent, base_speaker_inde
            gt_accent, \
            gt_speaker, \
            gt_transcription, \
+           gt_mos, \
            gt_gen_accent, \
            gt_gen_speaker, \
            gt_gen_transcription, \
+           gt_gen_mos, \
            new_accent, \
            new_speaker, \
            new_transcription, \
+           new_mos, \
            fig
 
 # @app.callback(

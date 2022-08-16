@@ -2,6 +2,7 @@ import librosa
 import numpy as np
 import pandas as pd
 import torch
+import torchaudio
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -10,14 +11,14 @@ import seaborn as sn
 import accent_model
 import speaker_model
 import inference_alon
-from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+# from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 # from pandas_ml import ConfusionMatrix
 
 from tqdm import tqdm
-
+from UTMOS.mos_predictor import MosModel
 
 class Evaluator:
-    def __init__(self, speakers_list):
+    def __init__(self, speakers_list, wav2vec2=False):
         ## accent model section
         self.accent_m = accent_model.AccentModel()
         self.accent_mapping_dict = self.accent_m.get_accent_mapping()
@@ -26,13 +27,19 @@ class Evaluator:
         self.accent_list = list(self.accent_to_id_dict.keys())
 
         ## wev2vec2 section
-        self.processor_wav2vec2 = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
-        self.model_wav2vec2l = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
+        if wav2vec2:
+            from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+
+            self.processor_wav2vec2 = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
+            self.model_wav2vec2l = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base-960h")
 
         ## speaker model section
         self.speaker_m = speaker_model.SpeakerModel()
 
         self.speakers_list = speakers_list
+
+        ## MOS predictor section
+        self.mos_model = MosModel()
 
     def evaluate_accent(self, waveform_path, final_prediction=True, get_waveform_path=False):
         if get_waveform_path:
@@ -74,6 +81,11 @@ class Evaluator:
         predicted_ids = torch.argmax(logits, dim=-1)
         transcription = self.processor_wav2vec2.batch_decode(predicted_ids)
         return transcription[0]
+
+    def evaluate_MOS(self, waveform_path):
+        wav, sr = torchaudio.load(waveform_path)
+        assert sr == 16_000, "waveform sample rate is not 16,000!!!!!"
+        return self.mos_model(wav)
 
 
 def get_speaker_and_accent_confusion_matrix(data, accent_list, speakers_list, output_name):
