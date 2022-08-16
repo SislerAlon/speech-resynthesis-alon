@@ -114,7 +114,7 @@ class GenerateWaveform:
                                        f0_stats=self.h.get('f0_stats', None), f0_normalize=self.h.get('f0_normalize', False),
                                        f0_feats=self.h.get('f0_feats', False), f0_median=self.h.get('f0_median', False),
                                        f0_interp=self.h.get('f0_interp', False), vqvae=self.h.get('code_vq_params', False),
-                                       pad=a.pad, accent_embedding_by_accent=self.h.get('Accent_embedding_by_accent', None))
+                                       pad=a.pad, accent_embedding_by_accent=self.h.get('Accent_embedding_by_accent', None),validation_data=True)
 
         if self.a.unseen_f0:
             self.dataset.f0_stats = torch.load(self.a.unseen_f0)
@@ -276,10 +276,9 @@ def init_generator(main_output_path='D:/Thesis/generated_results'):
     parser = argparse.ArgumentParser()
     parser.add_argument('--code_file', default=None)
     parser.add_argument('--input_code_file', default='./datasets/VCTK/hubert100/test.txt')
-    parser.add_argument('--output_dir', default=f'{main_output_path}/generated_files_accent_change_double_zero_accent_duration')
-    # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae_accent_speaker')  # , required=True)
-    # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_global_accent_accent_and_spealer_loss2')  # , required=True)
-    parser.add_argument('--checkpoint_file', default='checkpoints/run_on_inf')  # , required=True)
+    parser.add_argument('--output_dir', default=f'{main_output_path}/balance_dataset')
+    # parser.add_argument('--checkpoint_file', default='checkpoints/multi_loss_continue_from_pretrain_3rd_stage')  # , required=True)
+    parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_global_accent_accent_and_spealer_loss2')  # , required=True)
     # parser.add_argument('--checkpoint_file', default='checkpoints/VCTK_vqvae', required=True)
     parser.add_argument('--f0-stats', type=Path)
     parser.add_argument('--vc', action='store_true')
@@ -291,7 +290,7 @@ def init_generator(main_output_path='D:/Thesis/generated_results'):
     parser.add_argument('-n', type=int, default=20)
     parser.add_argument('--dur-prediction', default=True)# ,action='store_true')
     a = parser.parse_args()
-
+    print(f"working from checkpoint file: {a.checkpoint_file}")
     generator = GenerateWaveform(a)
     return generator
 
